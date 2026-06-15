@@ -59,6 +59,29 @@ python3 "jadivcalc_template(2).py"
 
 ---
 
+## Desktop launcher (Linux)
+
+To get a clickable entry (with icon) in your application menu instead of
+running from a terminal:
+
+```bash
+./install-launcher.sh
+```
+
+This installs two launchers — **JadivCalc Template** (English) and
+**JadivCalc Template (SK)** (Slovak) — plus the icon into your per-user XDG
+directories (`~/.local/share/applications` and
+`~/.local/share/icons`). No root access is required, and the launchers point
+back at the scripts in this folder, so keep the repository where it is.
+
+To remove them again:
+
+```bash
+./install-launcher.sh --uninstall
+```
+
+---
+
 ## Usage
 
 1. Click **⚙ Settings** (top-right corner) to configure:
@@ -109,6 +132,11 @@ back manually if needed.
 jadivcalc-template/
 ├── jadivcalc_template_en.py   # English version
 ├── jadivcalc_template(2).py   # Slovak version
+├── install-launcher.sh        # installs Linux desktop launchers
+├── assets/
+│   ├── jadivcalc.svg          # application icon
+│   ├── jadivcalc.desktop      # English launcher
+│   └── jadivcalc-sk.desktop   # Slovak launcher
 └── README.md
 ```
 

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=JadivCalc Template
+Comment=Generate divisibility math practice examples
+Comment[sk]=Generátor matematických príkladov na deliteľnosť
+Exec=python3 "__INSTALL_DIR__/jadivcalc_template_en.py"
+Icon=jadivcalc
+Terminal=false
+Categories=Education;Math;Utility;
+Keywords=math;division;divisibility;calculator;examples;worksheet;
+StartupNotify=true
