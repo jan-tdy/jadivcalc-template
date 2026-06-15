@@ -18,7 +18,10 @@ Saves:
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime
+from urllib.parse import quote
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -28,13 +31,102 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "1.1"
+APP_VERSION = "0.1.1"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
 DEFAULT_USED_FILE = "template-math_used.json"
 DEFAULT_TEMPLATE_FILE = "template-math.json"
 DEFAULT_TEMPLATE = "abcd/3=3*x       a+b+c+d=3*y"
+
+# --- self-update ------------------------------------------------------------
+
+GITHUB_OWNER = "jan-tdy"
+GITHUB_REPO = "jadivcalc-template"
+GITHUB_API_TAGS = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/tags"
+RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+
+
+def version_tuple(v):
+    """Parse a version/tag string ('v0.1.1', '1.2') into a comparable tuple."""
+    parts = []
+    for chunk in str(v).strip().lstrip("vV").split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def fetch_latest_tag(timeout=6):
+    """Return the newest tag name on GitHub (e.g. 'v0.1.2'), or None."""
+    req = urllib.request.Request(
+        GITHUB_API_TAGS,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": APP_NAME},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        tags = json.load(resp)
+    if not isinstance(tags, list) or not tags:
+        return None
+    best = max(tags, key=lambda t: version_tuple(t.get("name", "")))
+    return best.get("name")
+
+
+def download_script(tag, timeout=20):
+    """Download this script's source as published under `tag`."""
+    filename = os.path.basename(os.path.abspath(__file__))
+    url = f"{RAW_BASE}/{quote(tag)}/{quote(filename)}"
+    req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def install_update(tag):
+    """Download `tag` and overwrite the running script (keeping a .bak copy)."""
+    new_code = download_script(tag)
+    if not new_code or b"JadivCalc" not in new_code:
+        raise OSError("Downloaded file looks invalid.")
+    target = os.path.abspath(__file__)
+    tmp = target + ".new"
+    backup = target + ".bak"
+    with open(tmp, "wb") as f:
+        f.write(new_code)
+    if os.path.exists(target):
+        os.replace(target, backup)
+    os.replace(tmp, target)
+
+
+def check_for_update(parent=None):
+    """Check GitHub for a newer tag; offer to update via a popup.
+
+    Network errors are swallowed so the app still starts when offline.
+    """
+    try:
+        tag = fetch_latest_tag()
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+        return
+    if not tag or version_tuple(tag) <= version_tuple(APP_VERSION):
+        return
+
+    ask = QMessageBox(parent)
+    ask.setIcon(QMessageBox.Icon.Information)
+    ask.setWindowTitle("Update available")
+    ask.setText(f"A new version {tag} is available "
+                f"(you are running v{APP_VERSION}).")
+    ask.setInformativeText("Download and install it now?")
+    ask.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    ask.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if ask.exec() != QMessageBox.StandardButton.Yes:
+        return
+
+    try:
+        install_update(tag)
+    except (urllib.error.URLError, OSError) as e:
+        QMessageBox.critical(parent, "Update failed",
+                             f"Could not install the update:\n{e}")
+        return
+    QMessageBox.information(
+        parent, "Update complete",
+        f"Updated to {tag}.\nPlease restart the application to use it.")
 
 
 # --- core (GUI-independent logic) -------------------------------------------
@@ -435,6 +527,7 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     w = App()
     w.show()
+    check_for_update(w)
     sys.exit(app.exec())
 
 

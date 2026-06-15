@@ -17,7 +17,10 @@ Ukladá:
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime
+from urllib.parse import quote
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -27,13 +30,102 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "1.1"
+APP_VERSION = "0.1.1"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
 DEFAULT_USED_FILE = "template-math_used.json"
 DEFAULT_TEMPLATE_FILE = "template-math.json"
 DEFAULT_TEMPLATE = "abcd/3=3*x       a+b+c+d=3*y"
+
+# --- automatická aktualizácia -----------------------------------------------
+
+GITHUB_OWNER = "jan-tdy"
+GITHUB_REPO = "jadivcalc-template"
+GITHUB_API_TAGS = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/tags"
+RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+
+
+def version_tuple(v):
+    """Rozparsuje verziu/tag ('v0.1.1', '1.2') na porovnateľnú n-ticu."""
+    parts = []
+    for chunk in str(v).strip().lstrip("vV").split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+def fetch_latest_tag(timeout=6):
+    """Vráti najnovší tag na GitHube (napr. 'v0.1.2'), alebo None."""
+    req = urllib.request.Request(
+        GITHUB_API_TAGS,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": APP_NAME},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        tags = json.load(resp)
+    if not isinstance(tags, list) or not tags:
+        return None
+    best = max(tags, key=lambda t: version_tuple(t.get("name", "")))
+    return best.get("name")
+
+
+def download_script(tag, timeout=20):
+    """Stiahne zdrojový kód tohto skriptu publikovaný pod `tag`."""
+    filename = os.path.basename(os.path.abspath(__file__))
+    url = f"{RAW_BASE}/{quote(tag)}/{quote(filename)}"
+    req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def install_update(tag):
+    """Stiahne `tag` a prepíše spustený skript (so zálohou .bak)."""
+    new_code = download_script(tag)
+    if not new_code or b"JadivCalc" not in new_code:
+        raise OSError("Stiahnutý súbor sa zdá byť poškodený.")
+    target = os.path.abspath(__file__)
+    tmp = target + ".new"
+    backup = target + ".bak"
+    with open(tmp, "wb") as f:
+        f.write(new_code)
+    if os.path.exists(target):
+        os.replace(target, backup)
+    os.replace(tmp, target)
+
+
+def check_for_update(parent=None):
+    """Skontroluje na GitHube novší tag a cez okno ponúkne aktualizáciu.
+
+    Sieťové chyby sa potlačia, aby sa aplikácia spustila aj offline.
+    """
+    try:
+        tag = fetch_latest_tag()
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+        return
+    if not tag or version_tuple(tag) <= version_tuple(APP_VERSION):
+        return
+
+    ask = QMessageBox(parent)
+    ask.setIcon(QMessageBox.Icon.Information)
+    ask.setWindowTitle("Dostupná aktualizácia")
+    ask.setText(f"K dispozícii je nová verzia {tag} "
+                f"(používaš v{APP_VERSION}).")
+    ask.setInformativeText("Stiahnuť a nainštalovať teraz?")
+    ask.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    ask.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if ask.exec() != QMessageBox.StandardButton.Yes:
+        return
+
+    try:
+        install_update(tag)
+    except (urllib.error.URLError, OSError) as e:
+        QMessageBox.critical(parent, "Aktualizácia zlyhala",
+                             f"Aktualizáciu sa nepodarilo nainštalovať:\n{e}")
+        return
+    QMessageBox.information(
+        parent, "Aktualizácia dokončená",
+        f"Aktualizované na {tag}.\nReštartuj aplikáciu, aby sa prejavila.")
 
 
 # --- jadro (logika, nezávislá od GUI) ---------------------------------------
@@ -433,6 +525,7 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     w = App()
     w.show()
+    check_for_update(w)
     sys.exit(app.exec())
 
 
