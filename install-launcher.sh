@@ -39,9 +39,12 @@ do_install() {
     mkdir -p "$APP_DIR" "$ICON_DIR"
     install -m 0644 "$ASSETS_DIR/$ICON_NAME" "$ICON_DIR/$ICON_NAME"
 
+    local escaped_repo_dir
+    escaped_repo_dir=$(printf '%s\n' "$REPO_DIR" | sed 's/[&|\]/\\&/g')
+
     for f in "${DESKTOP_FILES[@]}"; do
         # Substitute the placeholder with the real repo path.
-        sed "s|__INSTALL_DIR__|$REPO_DIR|g" "$ASSETS_DIR/$f" > "$APP_DIR/$f"
+        sed "s|__INSTALL_DIR__|$escaped_repo_dir|g" "$ASSETS_DIR/$f" > "$APP_DIR/$f"
         chmod 0644 "$APP_DIR/$f"
     done
 
