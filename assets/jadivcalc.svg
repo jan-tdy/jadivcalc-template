@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f8cff"/>
+      <stop offset="1" stop-color="#2b5fd6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded background -->
+  <rect x="16" y="16" width="224" height="224" rx="44" fill="url(#bg)"/>
+
+  <!-- division sign -->
+  <g fill="#ffffff">
+    <circle cx="128" cy="78" r="13"/>
+    <rect x="64" y="120" width="128" height="16" rx="8"/>
+    <circle cx="128" cy="178" r="13"/>
+  </g>
+
+  <!-- multiplication sign, lower-right accent -->
+  <g stroke="#ffd84d" stroke-width="13" stroke-linecap="round">
+    <line x1="178" y1="190" x2="206" y2="218"/>
+    <line x1="206" y1="190" x2="178" y2="218"/>
+  </g>
+</svg>
