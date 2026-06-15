@@ -32,7 +32,7 @@ update_caches() {
     command -v update-desktop-database >/dev/null 2>&1 \
         && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 \
-        && gtk-update-icon-cache -f -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" >/dev/null 2>&1 || true
+        && gtk-update-icon-cache -f -i -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" >/dev/null 2>&1 || true
 }
 
 do_install() {
