@@ -55,6 +55,11 @@ do_install() {
 
 if [[ "${1:-}" == "--uninstall" || "${1:-}" == "-u" ]]; then
     do_uninstall
-else
+elif [[ -z "${1:-}" ]]; then
     do_install
+else
+    echo "Usage: $0 [options]"
+    echo "  -u, --uninstall  Uninstall the launchers and icon"
+    echo "  -h, --help       Show this help message"
+    exit 1
 fi
