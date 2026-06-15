@@ -1,2 +1,4 @@
 # jadivcalc-template
 Simple Python GUI program that generates math examples based on json file
+
+Downlaod here: https://github.com/jan-tdy/jadivcalc-template/releases
