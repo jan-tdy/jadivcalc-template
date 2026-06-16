@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "publisher": "jan-tdy",
+  "repo": "jadivcalc-template",
+  "homepage": "https://github.com/jan-tdy/jadivcalc-template",
+  "apps": [
+    {
+      "id": "jadivcalc",
+      "name": "JadivCalc",
+      "tagline": "Generate math divisibility practice examples",
+      "description": "A friendly PyQt6 desktop GUI that generates math practice examples — N-digit numbers divisible by a chosen divisor, optionally filtered by the divisibility of their digit sum. Results export to plain text and every example is tracked so you never hand out the same exercise twice. Available in English and Slovak.",
+      "category": "Education",
+      "version": "0.1.1",
+      "author": "JapySoft TDY",
+      "icon": "assets/jadivcalc.svg",
+      "subdir": ".",
+      "entrypoint": "jadivcalc_template_en.py",
+      "run": "python3 jadivcalc_template_en.py",
+      "update_method": "release",
+      "maintained": true
+    }
+  ]
+}
