@@ -23,6 +23,7 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
+from PyQt6.QtCore import QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -31,7 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -94,16 +95,75 @@ def install_update(tag):
     os.replace(tmp, target)
 
 
-def check_for_update(parent=None):
-    """Check GitHub for a newer tag; offer to update via a popup.
+def restart_app():
+    """Relaunch the app and quit this instance (cross-platform restart)."""
+    QProcess.startDetached(sys.executable,
+                           [os.path.abspath(__file__), *sys.argv[1:]])
+    QApplication.quit()
 
-    Network errors are swallowed so the app still starts when offline.
+
+class _TagFetcher(QThread):
+    """Fetch the latest tag off the GUI thread; emit (tag, error)."""
+    result = pyqtSignal(object, object)
+
+    def run(self):
+        try:
+            self.result.emit(fetch_latest_tag(), None)
+        except (urllib.error.URLError, OSError, ValueError,
+                json.JSONDecodeError) as e:
+            self.result.emit(None, e)
+
+
+# Keep references to running fetchers so they aren't garbage-collected.
+_update_threads = []
+
+
+def check_for_update(parent=None, silent=True):
+    """Check GitHub for a newer tag (in the background) and report via popups.
+
+    The network request runs on a worker thread so the GUI never freezes. When
+    `silent` is True (the automatic check at startup) errors and the "already
+    up to date" case produce no popup, so the app starts cleanly even when
+    offline. When False (a manual "Check for updates") every outcome is
+    reported so the user can see what happened.
     """
-    try:
-        tag = fetch_latest_tag()
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    fetcher = _TagFetcher()
+    _update_threads.append(fetcher)
+
+    fetcher.result.connect(
+        lambda tag, error: _apply_update_result(parent, silent, tag, error))
+
+    def _cleanup():
+        if fetcher in _update_threads:
+            _update_threads.remove(fetcher)
+        fetcher.deleteLater()
+
+    # Release the thread only once it has fully finished, so it is never
+    # collected while still running.
+    fetcher.finished.connect(_cleanup)
+    fetcher.start()
+
+
+def _apply_update_result(parent, silent, tag, error):
+    """Handle the fetch outcome on the GUI thread (popups, install, restart)."""
+    if error is not None:
+        if not silent:
+            QMessageBox.warning(
+                parent, "Update check failed",
+                f"Could not reach GitHub to check for updates:\n{error}")
         return
-    if not tag or version_tuple(tag) <= version_tuple(APP_VERSION):
+
+    if not tag:
+        if not silent:
+            QMessageBox.warning(parent, "Update check",
+                                "No releases were found on GitHub.")
+        return
+
+    if version_tuple(tag) <= version_tuple(APP_VERSION):
+        if not silent:
+            QMessageBox.information(
+                parent, "Up to date",
+                f"You are running the latest version (v{APP_VERSION}).")
         return
 
     ask = QMessageBox(parent)
@@ -124,9 +184,17 @@ def check_for_update(parent=None):
         QMessageBox.critical(parent, "Update failed",
                              f"Could not install the update:\n{e}")
         return
-    QMessageBox.information(
-        parent, "Update complete",
-        f"Updated to {tag}.\nPlease restart the application to use it.")
+
+    done = QMessageBox(parent)
+    done.setIcon(QMessageBox.Icon.Information)
+    done.setWindowTitle("Update complete")
+    done.setText(f"Updated to {tag}.")
+    done.setInformativeText("Restart now to use the new version?")
+    done.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    done.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if done.exec() == QMessageBox.StandardButton.Yes:
+        restart_app()
 
 
 # --- core (GUI-independent logic) -------------------------------------------
@@ -318,6 +386,16 @@ class SettingsDialog(QDialog):
         self.save_tpl.setChecked(s["save_tpl"])
         og.addWidget(self.save_tpl)
         lay.addWidget(opts)
+
+        # Updates
+        updates = QGroupBox("Updates")
+        ug = QHBoxLayout(updates)
+        ug.addWidget(QLabel(f"Current version: v{APP_VERSION}"))
+        ug.addStretch(1)
+        btn_upd = QPushButton("Check for updates")
+        btn_upd.clicked.connect(lambda: check_for_update(self, silent=False))
+        ug.addWidget(btn_upd)
+        lay.addWidget(updates)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         bb.rejected.connect(self.accept)
@@ -527,7 +605,9 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     w = App()
     w.show()
-    check_for_update(w)
+    # Run the startup update check once the window is painted; stay silent on
+    # errors / "up to date" so launching offline is never interrupted.
+    QTimer.singleShot(0, lambda: check_for_update(w, silent=True))
     sys.exit(app.exec())
 
 

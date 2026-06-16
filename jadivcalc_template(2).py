@@ -22,6 +22,7 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
+from PyQt6.QtCore import QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -30,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -93,16 +94,73 @@ def install_update(tag):
     os.replace(tmp, target)
 
 
-def check_for_update(parent=None):
-    """Skontroluje na GitHube novší tag a cez okno ponúkne aktualizáciu.
+def restart_app():
+    """Znovu spustí appku a ukončí túto inštanciu (multiplatformový reštart)."""
+    QProcess.startDetached(sys.executable,
+                           [os.path.abspath(__file__), *sys.argv[1:]])
+    QApplication.quit()
 
-    Sieťové chyby sa potlačia, aby sa aplikácia spustila aj offline.
+
+class _TagFetcher(QThread):
+    """Stiahne najnovší tag mimo GUI vlákna; emituje (tag, error)."""
+    result = pyqtSignal(object, object)
+
+    def run(self):
+        try:
+            self.result.emit(fetch_latest_tag(), None)
+        except (urllib.error.URLError, OSError, ValueError,
+                json.JSONDecodeError) as e:
+            self.result.emit(None, e)
+
+
+# Udrž referencie na bežiace vlákna, aby ich neodpratal garbage collector.
+_update_threads = []
+
+
+def check_for_update(parent=None, silent=True):
+    """Skontroluje na GitHube novší tag (na pozadí) a výsledok ukáže v okne.
+
+    Sieťová požiadavka beží na pracovnom vlákne, takže GUI nikdy nezamrzne. Pri
+    `silent` = True (automatická kontrola pri štarte) sa chyby aj prípad „máš
+    najnovšiu verziu“ nezobrazia, takže sa aplikácia spustí aj offline. Pri
+    False (manuálne „Skontrolovať aktualizácie“) sa zobrazí každý výsledok.
     """
-    try:
-        tag = fetch_latest_tag()
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    fetcher = _TagFetcher()
+    _update_threads.append(fetcher)
+
+    fetcher.result.connect(
+        lambda tag, error: _apply_update_result(parent, silent, tag, error))
+
+    def _cleanup():
+        if fetcher in _update_threads:
+            _update_threads.remove(fetcher)
+        fetcher.deleteLater()
+
+    # Vlákno uvoľni až po úplnom dokončení, aby sa nikdy neodpratalo počas behu.
+    fetcher.finished.connect(_cleanup)
+    fetcher.start()
+
+
+def _apply_update_result(parent, silent, tag, error):
+    """Spracuje výsledok kontroly na GUI vlákne (okná, inštalácia, reštart)."""
+    if error is not None:
+        if not silent:
+            QMessageBox.warning(
+                parent, "Kontrola aktualizácií zlyhala",
+                f"Nepodarilo sa spojiť s GitHubom kvôli kontrole aktualizácií:\n{error}")
         return
-    if not tag or version_tuple(tag) <= version_tuple(APP_VERSION):
+
+    if not tag:
+        if not silent:
+            QMessageBox.warning(parent, "Kontrola aktualizácií",
+                                "Na GitHube sa nenašli žiadne vydania.")
+        return
+
+    if version_tuple(tag) <= version_tuple(APP_VERSION):
+        if not silent:
+            QMessageBox.information(
+                parent, "Aktuálna verzia",
+                f"Používaš najnovšiu verziu (v{APP_VERSION}).")
         return
 
     ask = QMessageBox(parent)
@@ -123,9 +181,17 @@ def check_for_update(parent=None):
         QMessageBox.critical(parent, "Aktualizácia zlyhala",
                              f"Aktualizáciu sa nepodarilo nainštalovať:\n{e}")
         return
-    QMessageBox.information(
-        parent, "Aktualizácia dokončená",
-        f"Aktualizované na {tag}.\nReštartuj aplikáciu, aby sa prejavila.")
+
+    done = QMessageBox(parent)
+    done.setIcon(QMessageBox.Icon.Information)
+    done.setWindowTitle("Aktualizácia dokončená")
+    done.setText(f"Aktualizované na {tag}.")
+    done.setInformativeText("Reštartovať teraz, aby sa nová verzia prejavila?")
+    done.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    done.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if done.exec() == QMessageBox.StandardButton.Yes:
+        restart_app()
 
 
 # --- jadro (logika, nezávislá od GUI) ---------------------------------------
@@ -317,6 +383,16 @@ class SettingsDialog(QDialog):
         self.save_tpl.setChecked(s["save_tpl"])
         og.addWidget(self.save_tpl)
         lay.addWidget(opts)
+
+        # Aktualizácie
+        updates = QGroupBox("Aktualizácie")
+        ug = QHBoxLayout(updates)
+        ug.addWidget(QLabel(f"Aktuálna verzia: v{APP_VERSION}"))
+        ug.addStretch(1)
+        btn_upd = QPushButton("Skontrolovať aktualizácie")
+        btn_upd.clicked.connect(lambda: check_for_update(self, silent=False))
+        ug.addWidget(btn_upd)
+        lay.addWidget(updates)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         bb.rejected.connect(self.accept)
@@ -525,7 +601,9 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     w = App()
     w.show()
-    check_for_update(w)
+    # Kontrolu aktualizácií spusti až po vykreslení okna; pri chybách / aktuálnej
+    # verzii ostane ticho, aby spustenie offline nič nerušilo.
+    QTimer.singleShot(0, lambda: check_for_update(w, silent=True))
     sys.exit(app.exec())
 
 
