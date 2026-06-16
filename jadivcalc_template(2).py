@@ -80,7 +80,10 @@ def download_script(tag, progress=None, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
     chunks = []
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        total = int(resp.headers.get("Content-Length") or 0)
+        try:
+            total = int(resp.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            total = 0
         read = 0
         while True:
             chunk = resp.read(8192)
@@ -157,7 +160,7 @@ def _track(thread):
             _update_threads.remove(thread)
         thread.deleteLater()
 
-    thread.finished.connect(_cleanup)
+    thread.finished.connect(_cleanup, Qt.ConnectionType.QueuedConnection)
 
 
 def check_for_update(parent=None, silent=True):
@@ -180,7 +183,8 @@ def check_for_update(parent=None, silent=True):
 
     fetcher = _TagFetcher()
     fetcher.result.connect(
-        lambda tag, error: _apply_update_result(parent, silent, tag, error, busy))
+        lambda tag, error: _apply_update_result(parent, silent, tag, error, busy),
+        Qt.ConnectionType.QueuedConnection)
     _track(fetcher)
     fetcher.start()
 
@@ -231,9 +235,10 @@ def _apply_update_result(parent, silent, tag, error, busy=None):
     dlg.show()
 
     downloader = _Downloader(tag)
-    downloader.progress.connect(dlg.setValue)
+    downloader.progress.connect(dlg.setValue, Qt.ConnectionType.QueuedConnection)
     downloader.done.connect(
-        lambda err: _finish_update(parent, tag, dlg, err))
+        lambda err: _finish_update(parent, tag, dlg, err),
+        Qt.ConnectionType.QueuedConnection)
     _track(downloader)
     downloader.start()
 
