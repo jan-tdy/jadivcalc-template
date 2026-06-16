@@ -22,12 +22,12 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
-from PyQt6.QtCore import QProcess, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressDialog, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 APP_NAME = "JadivCalc Template"
@@ -70,18 +70,32 @@ def fetch_latest_tag(timeout=6):
     return best.get("name")
 
 
-def download_script(tag, timeout=20):
-    """Stiahne zdrojový kód tohto skriptu publikovaný pod `tag`."""
+def download_script(tag, progress=None, timeout=20):
+    """Stiahne zdrojový kód tohto skriptu publikovaný pod `tag`.
+
+    `progress`, ak je zadané, sa volá s percentom (0-100) počas sťahovania
+    (iba ak server uvedie dĺžku obsahu)."""
     filename = os.path.basename(os.path.abspath(__file__))
     url = f"{RAW_BASE}/{quote(tag)}/{quote(filename)}"
     req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
+    chunks = []
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        total = int(resp.headers.get("Content-Length") or 0)
+        read = 0
+        while True:
+            chunk = resp.read(8192)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            read += len(chunk)
+            if progress and total:
+                progress(min(100, int(read * 100 / total)))
+    return b"".join(chunks)
 
 
-def install_update(tag):
+def install_update(tag, progress=None):
     """Stiahne `tag` a prepíše spustený skript (so zálohou .bak)."""
-    new_code = download_script(tag)
+    new_code = download_script(tag, progress=progress)
     if not new_code or b"JadivCalc" not in new_code:
         raise OSError("Stiahnutý súbor sa zdá byť poškodený.")
     target = os.path.abspath(__file__)
@@ -113,8 +127,37 @@ class _TagFetcher(QThread):
             self.result.emit(None, e)
 
 
+class _Downloader(QThread):
+    """Stiahne a nainštaluje `tag` mimo GUI vlákna, hlási priebeh."""
+    progress = pyqtSignal(int)
+    done = pyqtSignal(object)  # None pri úspechu, inak vyvolaná výnimka
+
+    def __init__(self, tag):
+        super().__init__()
+        self._tag = tag
+
+    def run(self):
+        try:
+            install_update(self._tag, progress=self.progress.emit)
+            self.done.emit(None)
+        except (urllib.error.URLError, OSError) as e:
+            self.done.emit(e)
+
+
 # Udrž referencie na bežiace vlákna, aby ich neodpratal garbage collector.
 _update_threads = []
+
+
+def _track(thread):
+    """Sleduj pracovné vlákno a uvoľni ho až po úplnom dokončení."""
+    _update_threads.append(thread)
+
+    def _cleanup():
+        if thread in _update_threads:
+            _update_threads.remove(thread)
+        thread.deleteLater()
+
+    thread.finished.connect(_cleanup)
 
 
 def check_for_update(parent=None, silent=True):
@@ -123,26 +166,30 @@ def check_for_update(parent=None, silent=True):
     Sieťová požiadavka beží na pracovnom vlákne, takže GUI nikdy nezamrzne. Pri
     `silent` = True (automatická kontrola pri štarte) sa chyby aj prípad „máš
     najnovšiu verziu“ nezobrazia, takže sa aplikácia spustí aj offline. Pri
-    False (manuálne „Skontrolovať aktualizácie“) sa zobrazí každý výsledok.
+    False (manuálne „Skontrolovať aktualizácie“) sa zobrazí okno s priebehom
+    a každý výsledok, aby používateľ videl, čo sa stalo.
     """
+    busy = None
+    if not silent:
+        busy = QProgressDialog("Kontrolujem aktualizácie…", None, 0, 0, parent)
+        busy.setWindowTitle("Aktualizácie")
+        busy.setWindowModality(Qt.WindowModality.WindowModal)
+        busy.setCancelButton(None)
+        busy.setMinimumDuration(0)
+        busy.show()
+
     fetcher = _TagFetcher()
-    _update_threads.append(fetcher)
-
     fetcher.result.connect(
-        lambda tag, error: _apply_update_result(parent, silent, tag, error))
-
-    def _cleanup():
-        if fetcher in _update_threads:
-            _update_threads.remove(fetcher)
-        fetcher.deleteLater()
-
-    # Vlákno uvoľni až po úplnom dokončení, aby sa nikdy neodpratalo počas behu.
-    fetcher.finished.connect(_cleanup)
+        lambda tag, error: _apply_update_result(parent, silent, tag, error, busy))
+    _track(fetcher)
     fetcher.start()
 
 
-def _apply_update_result(parent, silent, tag, error):
-    """Spracuje výsledok kontroly na GUI vlákne (okná, inštalácia, reštart)."""
+def _apply_update_result(parent, silent, tag, error, busy=None):
+    """Spracuje výsledok kontroly na GUI vlákne (okná, sťahovanie, reštart)."""
+    if busy is not None:
+        busy.close()
+
     if error is not None:
         if not silent:
             QMessageBox.warning(
@@ -175,11 +222,28 @@ def _apply_update_result(parent, silent, tag, error):
     if ask.exec() != QMessageBox.StandardButton.Yes:
         return
 
-    try:
-        install_update(tag)
-    except (urllib.error.URLError, OSError) as e:
+    dlg = QProgressDialog(f"Sťahujem {tag}…", None, 0, 100, parent)
+    dlg.setWindowTitle("Aktualizujem")
+    dlg.setWindowModality(Qt.WindowModality.WindowModal)
+    dlg.setCancelButton(None)
+    dlg.setMinimumDuration(0)
+    dlg.setValue(0)
+    dlg.show()
+
+    downloader = _Downloader(tag)
+    downloader.progress.connect(dlg.setValue)
+    downloader.done.connect(
+        lambda err: _finish_update(parent, tag, dlg, err))
+    _track(downloader)
+    downloader.start()
+
+
+def _finish_update(parent, tag, dlg, error):
+    """Zatvorí okno priebehu a oznámi výsledok sťahovania."""
+    dlg.close()
+    if error is not None:
         QMessageBox.critical(parent, "Aktualizácia zlyhala",
-                             f"Aktualizáciu sa nepodarilo nainštalovať:\n{e}")
+                             f"Aktualizáciu sa nepodarilo nainštalovať:\n{error}")
         return
 
     done = QMessageBox(parent)

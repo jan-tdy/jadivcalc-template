@@ -23,12 +23,12 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
-from PyQt6.QtCore import QProcess, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressDialog, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 APP_NAME = "JadivCalc Template"
@@ -71,18 +71,32 @@ def fetch_latest_tag(timeout=6):
     return best.get("name")
 
 
-def download_script(tag, timeout=20):
-    """Download this script's source as published under `tag`."""
+def download_script(tag, progress=None, timeout=20):
+    """Download this script's source as published under `tag`.
+
+    `progress`, if given, is called with an integer percentage (0-100) as the
+    download streams (only when the server reports a content length)."""
     filename = os.path.basename(os.path.abspath(__file__))
     url = f"{RAW_BASE}/{quote(tag)}/{quote(filename)}"
     req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
+    chunks = []
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        total = int(resp.headers.get("Content-Length") or 0)
+        read = 0
+        while True:
+            chunk = resp.read(8192)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            read += len(chunk)
+            if progress and total:
+                progress(min(100, int(read * 100 / total)))
+    return b"".join(chunks)
 
 
-def install_update(tag):
+def install_update(tag, progress=None):
     """Download `tag` and overwrite the running script (keeping a .bak copy)."""
-    new_code = download_script(tag)
+    new_code = download_script(tag, progress=progress)
     if not new_code or b"JadivCalc" not in new_code:
         raise OSError("Downloaded file looks invalid.")
     target = os.path.abspath(__file__)
@@ -114,8 +128,37 @@ class _TagFetcher(QThread):
             self.result.emit(None, e)
 
 
-# Keep references to running fetchers so they aren't garbage-collected.
+class _Downloader(QThread):
+    """Download and install `tag` off the GUI thread, reporting progress."""
+    progress = pyqtSignal(int)
+    done = pyqtSignal(object)  # None on success, else the raised exception
+
+    def __init__(self, tag):
+        super().__init__()
+        self._tag = tag
+
+    def run(self):
+        try:
+            install_update(self._tag, progress=self.progress.emit)
+            self.done.emit(None)
+        except (urllib.error.URLError, OSError) as e:
+            self.done.emit(e)
+
+
+# Keep references to running worker threads so they aren't garbage-collected.
 _update_threads = []
+
+
+def _track(thread):
+    """Track a worker thread and drop it once it has fully finished."""
+    _update_threads.append(thread)
+
+    def _cleanup():
+        if thread in _update_threads:
+            _update_threads.remove(thread)
+        thread.deleteLater()
+
+    thread.finished.connect(_cleanup)
 
 
 def check_for_update(parent=None, silent=True):
@@ -124,28 +167,30 @@ def check_for_update(parent=None, silent=True):
     The network request runs on a worker thread so the GUI never freezes. When
     `silent` is True (the automatic check at startup) errors and the "already
     up to date" case produce no popup, so the app starts cleanly even when
-    offline. When False (a manual "Check for updates") every outcome is
-    reported so the user can see what happened.
+    offline. When False (a manual "Check for updates") a progress dialog is
+    shown and every outcome is reported so the user can see what happened.
     """
+    busy = None
+    if not silent:
+        busy = QProgressDialog("Checking for updates…", None, 0, 0, parent)
+        busy.setWindowTitle("Updates")
+        busy.setWindowModality(Qt.WindowModality.WindowModal)
+        busy.setCancelButton(None)
+        busy.setMinimumDuration(0)
+        busy.show()
+
     fetcher = _TagFetcher()
-    _update_threads.append(fetcher)
-
     fetcher.result.connect(
-        lambda tag, error: _apply_update_result(parent, silent, tag, error))
-
-    def _cleanup():
-        if fetcher in _update_threads:
-            _update_threads.remove(fetcher)
-        fetcher.deleteLater()
-
-    # Release the thread only once it has fully finished, so it is never
-    # collected while still running.
-    fetcher.finished.connect(_cleanup)
+        lambda tag, error: _apply_update_result(parent, silent, tag, error, busy))
+    _track(fetcher)
     fetcher.start()
 
 
-def _apply_update_result(parent, silent, tag, error):
-    """Handle the fetch outcome on the GUI thread (popups, install, restart)."""
+def _apply_update_result(parent, silent, tag, error, busy=None):
+    """Handle the fetch outcome on the GUI thread (popups, download, restart)."""
+    if busy is not None:
+        busy.close()
+
     if error is not None:
         if not silent:
             QMessageBox.warning(
@@ -178,11 +223,28 @@ def _apply_update_result(parent, silent, tag, error):
     if ask.exec() != QMessageBox.StandardButton.Yes:
         return
 
-    try:
-        install_update(tag)
-    except (urllib.error.URLError, OSError) as e:
+    dlg = QProgressDialog(f"Downloading {tag}…", None, 0, 100, parent)
+    dlg.setWindowTitle("Updating")
+    dlg.setWindowModality(Qt.WindowModality.WindowModal)
+    dlg.setCancelButton(None)
+    dlg.setMinimumDuration(0)
+    dlg.setValue(0)
+    dlg.show()
+
+    downloader = _Downloader(tag)
+    downloader.progress.connect(dlg.setValue)
+    downloader.done.connect(
+        lambda err: _finish_update(parent, tag, dlg, err))
+    _track(downloader)
+    downloader.start()
+
+
+def _finish_update(parent, tag, dlg, error):
+    """Close the progress dialog and report the download outcome."""
+    dlg.close()
+    if error is not None:
         QMessageBox.critical(parent, "Update failed",
-                             f"Could not install the update:\n{e}")
+                             f"Could not install the update:\n{error}")
         return
 
     done = QMessageBox(parent)
