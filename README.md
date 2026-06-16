@@ -113,16 +113,26 @@ When the app starts it quietly asks GitHub for the latest published
 the version it is running.
 
 - If a **newer version** exists, a popup appears offering to download and
-  install it. Choosing **Yes** replaces the running script in place and keeps a
-  backup with a `.bak` extension; you then restart the app to use the new
-  version.
-- If you are **already up to date**, nothing happens.
-- If you are **offline** (or GitHub can't be reached), the check is skipped
-  silently and the app starts normally.
+  install it. Choosing **Yes** replaces the running script in place (keeping a
+  `.bak` backup) and then offers to **restart the app automatically** so the
+  new version takes effect immediately.
+- If you are **already up to date** or **offline**, the automatic startup check
+  stays silent so launching the app is never interrupted.
+
+You can also check on demand at any time: open **⚙ Settings → Updates → Check
+for updates**. Unlike the startup check, the manual check reports every
+outcome — "up to date", a download error, or a new version — so you can see
+exactly what happened.
 
 The update only ever overwrites the script file it is launched from, and a
 `.bak` copy of the previous version is kept right next to it so you can roll
 back manually if needed.
+
+> **Note for maintainers:** the prompt only appears when a published
+> [tag](https://github.com/jan-tdy/jadivcalc-template/tags) is *newer* than the
+> `APP_VERSION` baked into the running scripts. When cutting a release, bump
+> `APP_VERSION` in both `.py` files and tag the commit to match (e.g. `v0.2.1`)
+> — otherwise existing installs will never see an update.
 
 ---
 

@@ -22,6 +22,7 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -30,7 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -93,16 +94,39 @@ def install_update(tag):
     os.replace(tmp, target)
 
 
-def check_for_update(parent=None):
+def restart_app():
+    """Znovu spustí bežiaci skript s rovnakým interpretrom a argumentmi."""
+    os.execv(sys.executable,
+             [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+
+
+def check_for_update(parent=None, silent=True):
     """Skontroluje na GitHube novší tag a cez okno ponúkne aktualizáciu.
 
-    Sieťové chyby sa potlačia, aby sa aplikácia spustila aj offline.
+    Pri `silent` = True (automatická kontrola pri štarte) sa chyby aj prípad
+    „máš najnovšiu verziu“ nezobrazia, takže sa aplikácia spustí aj offline.
+    Pri False (manuálne „Skontrolovať aktualizácie“) sa zobrazí každý výsledok.
     """
     try:
         tag = fetch_latest_tag()
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as e:
+        if not silent:
+            QMessageBox.warning(
+                parent, "Kontrola aktualizácií zlyhala",
+                f"Nepodarilo sa spojiť s GitHubom kvôli kontrole aktualizácií:\n{e}")
         return
-    if not tag or version_tuple(tag) <= version_tuple(APP_VERSION):
+
+    if not tag:
+        if not silent:
+            QMessageBox.warning(parent, "Kontrola aktualizácií",
+                                "Na GitHube sa nenašli žiadne vydania.")
+        return
+
+    if version_tuple(tag) <= version_tuple(APP_VERSION):
+        if not silent:
+            QMessageBox.information(
+                parent, "Aktuálna verzia",
+                f"Používaš najnovšiu verziu (v{APP_VERSION}).")
         return
 
     ask = QMessageBox(parent)
@@ -123,9 +147,17 @@ def check_for_update(parent=None):
         QMessageBox.critical(parent, "Aktualizácia zlyhala",
                              f"Aktualizáciu sa nepodarilo nainštalovať:\n{e}")
         return
-    QMessageBox.information(
-        parent, "Aktualizácia dokončená",
-        f"Aktualizované na {tag}.\nReštartuj aplikáciu, aby sa prejavila.")
+
+    done = QMessageBox(parent)
+    done.setIcon(QMessageBox.Icon.Information)
+    done.setWindowTitle("Aktualizácia dokončená")
+    done.setText(f"Aktualizované na {tag}.")
+    done.setInformativeText("Reštartovať teraz, aby sa nová verzia prejavila?")
+    done.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    done.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if done.exec() == QMessageBox.StandardButton.Yes:
+        restart_app()
 
 
 # --- jadro (logika, nezávislá od GUI) ---------------------------------------
@@ -317,6 +349,16 @@ class SettingsDialog(QDialog):
         self.save_tpl.setChecked(s["save_tpl"])
         og.addWidget(self.save_tpl)
         lay.addWidget(opts)
+
+        # Aktualizácie
+        updates = QGroupBox("Aktualizácie")
+        ug = QHBoxLayout(updates)
+        ug.addWidget(QLabel(f"Aktuálna verzia: v{APP_VERSION}"))
+        ug.addStretch(1)
+        btn_upd = QPushButton("Skontrolovať aktualizácie")
+        btn_upd.clicked.connect(lambda: check_for_update(self, silent=False))
+        ug.addWidget(btn_upd)
+        lay.addWidget(updates)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         bb.rejected.connect(self.accept)
@@ -525,7 +567,9 @@ def main():
     app.setApplicationDisplayName(APP_NAME)
     w = App()
     w.show()
-    check_for_update(w)
+    # Kontrolu aktualizácií spusti až po vykreslení okna; pri chybách / aktuálnej
+    # verzii ostane ticho, aby spustenie offline nič nerušilo.
+    QTimer.singleShot(0, lambda: check_for_update(w, silent=True))
     sys.exit(app.exec())
 
 
