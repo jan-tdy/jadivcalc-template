@@ -10,7 +10,7 @@
       "tagline": "Generate math divisibility practice examples",
       "description": "A friendly PyQt6 desktop GUI that generates math practice examples — N-digit numbers divisible by a chosen divisor, optionally filtered by the divisibility of their digit sum. Results export to plain text and every example is tracked so you never hand out the same exercise twice. Available in English and Slovak.",
       "category": "Education",
-      "version": "1.0.0",
+      "version": "0.1.1",
       "author": "JapySoft TDY",
       "icon": "assets/jadivcalc.svg",
       "subdir": ".",
