@@ -23,7 +23,7 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -96,26 +96,61 @@ def install_update(tag):
 
 
 def restart_app():
-    """Relaunch the running script with the same interpreter and arguments."""
-    os.execv(sys.executable,
-             [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+    """Relaunch the app and quit this instance (cross-platform restart)."""
+    QProcess.startDetached(sys.executable,
+                           [os.path.abspath(__file__), *sys.argv[1:]])
+    QApplication.quit()
+
+
+class _TagFetcher(QThread):
+    """Fetch the latest tag off the GUI thread; emit (tag, error)."""
+    result = pyqtSignal(object, object)
+
+    def run(self):
+        try:
+            self.result.emit(fetch_latest_tag(), None)
+        except (urllib.error.URLError, OSError, ValueError,
+                json.JSONDecodeError) as e:
+            self.result.emit(None, e)
+
+
+# Keep references to running fetchers so they aren't garbage-collected.
+_update_threads = []
 
 
 def check_for_update(parent=None, silent=True):
-    """Check GitHub for a newer tag and offer to update via a popup.
+    """Check GitHub for a newer tag (in the background) and report via popups.
 
-    When `silent` is True (the automatic check at startup) errors and the
-    "already up to date" case produce no popup, so the app starts cleanly even
-    when offline. When False (a manual "Check for updates") every outcome is
+    The network request runs on a worker thread so the GUI never freezes. When
+    `silent` is True (the automatic check at startup) errors and the "already
+    up to date" case produce no popup, so the app starts cleanly even when
+    offline. When False (a manual "Check for updates") every outcome is
     reported so the user can see what happened.
     """
-    try:
-        tag = fetch_latest_tag()
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as e:
+    fetcher = _TagFetcher()
+    _update_threads.append(fetcher)
+
+    fetcher.result.connect(
+        lambda tag, error: _apply_update_result(parent, silent, tag, error))
+
+    def _cleanup():
+        if fetcher in _update_threads:
+            _update_threads.remove(fetcher)
+        fetcher.deleteLater()
+
+    # Release the thread only once it has fully finished, so it is never
+    # collected while still running.
+    fetcher.finished.connect(_cleanup)
+    fetcher.start()
+
+
+def _apply_update_result(parent, silent, tag, error):
+    """Handle the fetch outcome on the GUI thread (popups, install, restart)."""
+    if error is not None:
         if not silent:
             QMessageBox.warning(
                 parent, "Update check failed",
-                f"Could not reach GitHub to check for updates:\n{e}")
+                f"Could not reach GitHub to check for updates:\n{error}")
         return
 
     if not tag:

@@ -22,7 +22,7 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -95,25 +95,59 @@ def install_update(tag):
 
 
 def restart_app():
-    """Znovu spustí bežiaci skript s rovnakým interpretrom a argumentmi."""
-    os.execv(sys.executable,
-             [sys.executable, os.path.abspath(__file__), *sys.argv[1:]])
+    """Znovu spustí appku a ukončí túto inštanciu (multiplatformový reštart)."""
+    QProcess.startDetached(sys.executable,
+                           [os.path.abspath(__file__), *sys.argv[1:]])
+    QApplication.quit()
+
+
+class _TagFetcher(QThread):
+    """Stiahne najnovší tag mimo GUI vlákna; emituje (tag, error)."""
+    result = pyqtSignal(object, object)
+
+    def run(self):
+        try:
+            self.result.emit(fetch_latest_tag(), None)
+        except (urllib.error.URLError, OSError, ValueError,
+                json.JSONDecodeError) as e:
+            self.result.emit(None, e)
+
+
+# Udrž referencie na bežiace vlákna, aby ich neodpratal garbage collector.
+_update_threads = []
 
 
 def check_for_update(parent=None, silent=True):
-    """Skontroluje na GitHube novší tag a cez okno ponúkne aktualizáciu.
+    """Skontroluje na GitHube novší tag (na pozadí) a výsledok ukáže v okne.
 
-    Pri `silent` = True (automatická kontrola pri štarte) sa chyby aj prípad
-    „máš najnovšiu verziu“ nezobrazia, takže sa aplikácia spustí aj offline.
-    Pri False (manuálne „Skontrolovať aktualizácie“) sa zobrazí každý výsledok.
+    Sieťová požiadavka beží na pracovnom vlákne, takže GUI nikdy nezamrzne. Pri
+    `silent` = True (automatická kontrola pri štarte) sa chyby aj prípad „máš
+    najnovšiu verziu“ nezobrazia, takže sa aplikácia spustí aj offline. Pri
+    False (manuálne „Skontrolovať aktualizácie“) sa zobrazí každý výsledok.
     """
-    try:
-        tag = fetch_latest_tag()
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as e:
+    fetcher = _TagFetcher()
+    _update_threads.append(fetcher)
+
+    fetcher.result.connect(
+        lambda tag, error: _apply_update_result(parent, silent, tag, error))
+
+    def _cleanup():
+        if fetcher in _update_threads:
+            _update_threads.remove(fetcher)
+        fetcher.deleteLater()
+
+    # Vlákno uvoľni až po úplnom dokončení, aby sa nikdy neodpratalo počas behu.
+    fetcher.finished.connect(_cleanup)
+    fetcher.start()
+
+
+def _apply_update_result(parent, silent, tag, error):
+    """Spracuje výsledok kontroly na GUI vlákne (okná, inštalácia, reštart)."""
+    if error is not None:
         if not silent:
             QMessageBox.warning(
                 parent, "Kontrola aktualizácií zlyhala",
-                f"Nepodarilo sa spojiť s GitHubom kvôli kontrole aktualizácií:\n{e}")
+                f"Nepodarilo sa spojiť s GitHubom kvôli kontrole aktualizácií:\n{error}")
         return
 
     if not tag:
