@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
