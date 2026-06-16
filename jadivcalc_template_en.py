@@ -23,6 +23,7 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, QProcess, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -82,7 +83,7 @@ def download_script(tag, progress=None, timeout=20):
     chunks = []
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         try:
-            total = int(resp.headers.get("Content-Length") or 0)
+            total = max(0, int(resp.headers.get("Content-Length") or 0))
         except (TypeError, ValueError):
             total = 0
         read = 0
@@ -192,7 +193,11 @@ def check_for_update(parent=None, silent=True):
 
 def _apply_update_result(parent, silent, tag, error, busy=None):
     """Handle the fetch outcome on the GUI thread (popups, download, restart)."""
-    if busy is not None:
+    # The widgets are captured by a queued lambda; bail out if the user closed
+    # them (or the app) while the background check was running.
+    if parent is not None and sip.isdeleted(parent):
+        return
+    if busy is not None and not sip.isdeleted(busy):
         busy.close()
 
     if error is not None:
@@ -246,7 +251,10 @@ def _apply_update_result(parent, silent, tag, error, busy=None):
 
 def _finish_update(parent, tag, dlg, error):
     """Close the progress dialog and report the download outcome."""
-    dlg.close()
+    if parent is not None and sip.isdeleted(parent):
+        return
+    if dlg is not None and not sip.isdeleted(dlg):
+        dlg.close()
     if error is not None:
         QMessageBox.critical(parent, "Update failed",
                              f"Could not install the update:\n{error}")
