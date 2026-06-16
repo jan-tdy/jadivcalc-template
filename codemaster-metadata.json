@@ -6,7 +6,7 @@
   "apps": [
     {
       "id": "jadivcalc",
-      "name": "JadivCalc",
+      "name": "JadivCalc template",
       "tagline": "Generate math divisibility practice examples",
       "description": "A friendly PyQt6 desktop GUI that generates math practice examples — N-digit numbers divisible by a chosen divisor, optionally filtered by the divisibility of their digit sum. Results export to plain text and every example is tracked so you never hand out the same exercise twice. Available in English and Slovak.",
       "category": "Education",
