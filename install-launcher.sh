@@ -38,18 +38,25 @@ update_caches() {
 do_install() {
     mkdir -p "$APP_DIR" "$ICON_DIR"
     install -m 0644 "$ASSETS_DIR/$ICON_NAME" "$ICON_DIR/$ICON_NAME"
+    local icon_path="$ICON_DIR/$ICON_NAME"
 
-    local escaped_repo_dir
-    escaped_repo_dir=$(printf '%s\n' "$REPO_DIR" | sed 's/[&|\]/\\&/g')
+    # Escape characters that are special in a sed replacement (\, &, |).
+    local escaped_repo_dir escaped_icon
+    escaped_repo_dir=$(printf '%s' "$REPO_DIR" | sed 's/[&|\]/\\&/g')
+    escaped_icon=$(printf '%s' "$icon_path" | sed 's/[&|\]/\\&/g')
 
     for f in "${DESKTOP_FILES[@]}"; do
-        # Substitute the placeholder with the real repo path.
-        sed "s|__INSTALL_DIR__|$escaped_repo_dir|g" "$ASSETS_DIR/$f" > "$APP_DIR/$f"
+        # Point Exec at the repo and Icon at the absolute installed icon path,
+        # so the launcher shows the icon regardless of icon-theme caches.
+        sed -e "s|__INSTALL_DIR__|$escaped_repo_dir|g" \
+            -e "s|__ICON_PATH__|$escaped_icon|g" \
+            "$ASSETS_DIR/$f" > "$APP_DIR/$f"
         chmod 0644 "$APP_DIR/$f"
     done
 
     update_caches
     echo "Installed JadivCalc Template launchers into $APP_DIR"
+    echo "Installed icon to $icon_path"
     echo "Look for 'JadivCalc Template' in your application menu."
 }
 

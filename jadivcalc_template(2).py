@@ -24,7 +24,7 @@ from urllib.parse import quote
 
 from PyQt6 import sip
 from PyQt6.QtCore import Qt, QProcess, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.1.2"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -676,6 +676,10 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
+    icon_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "assets", "jadivcalc.svg")
+    if os.path.isfile(icon_file):
+        app.setWindowIcon(QIcon(icon_file))
     w = App()
     w.show()
     # Kontrolu aktualizácií spusti až po vykreslení okna; pri chybách / aktuálnej
