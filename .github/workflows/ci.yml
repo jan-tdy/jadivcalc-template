@@ -42,3 +42,20 @@ jobs:
       # not on stylistic preferences — keeps the gate useful and low-noise.
       - name: Check for errors
         run: ruff check --select E9,F63,F7,F82 --output-format=full .
+
+  version:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both language scripts embed APP_VERSION (used by the self-updater);
+      # fail if they ever drift apart so releases stay consistent.
+      - name: APP_VERSION matches across scripts
+        run: |
+          versions=$(grep -hoE 'APP_VERSION = "[^"]+"' *.py | sort -u)
+          echo "$versions"
+          if [ "$(printf '%s\n' "$versions" | grep -c .)" -ne 1 ]; then
+            echo "::error::APP_VERSION differs between the scripts"
+            exit 1
+          fi

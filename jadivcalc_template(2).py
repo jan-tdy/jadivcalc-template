@@ -22,8 +22,9 @@ import urllib.request
 from datetime import datetime
 from urllib.parse import quote
 
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, QProcess, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
@@ -31,7 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -80,7 +81,10 @@ def download_script(tag, progress=None, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
     chunks = []
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        total = int(resp.headers.get("Content-Length") or 0)
+        try:
+            total = max(0, int(resp.headers.get("Content-Length") or 0))
+        except (TypeError, ValueError):
+            total = 0
         read = 0
         while True:
             chunk = resp.read(8192)
@@ -157,7 +161,7 @@ def _track(thread):
             _update_threads.remove(thread)
         thread.deleteLater()
 
-    thread.finished.connect(_cleanup)
+    thread.finished.connect(_cleanup, Qt.ConnectionType.QueuedConnection)
 
 
 def check_for_update(parent=None, silent=True):
@@ -180,14 +184,19 @@ def check_for_update(parent=None, silent=True):
 
     fetcher = _TagFetcher()
     fetcher.result.connect(
-        lambda tag, error: _apply_update_result(parent, silent, tag, error, busy))
+        lambda tag, error: _apply_update_result(parent, silent, tag, error, busy),
+        Qt.ConnectionType.QueuedConnection)
     _track(fetcher)
     fetcher.start()
 
 
 def _apply_update_result(parent, silent, tag, error, busy=None):
     """Spracuje výsledok kontroly na GUI vlákne (okná, sťahovanie, reštart)."""
-    if busy is not None:
+    # Widgety zachytáva queued lambda; ak ich (alebo appku) používateľ medzitým
+    # zavrel počas kontroly na pozadí, skonči.
+    if parent is not None and sip.isdeleted(parent):
+        return
+    if busy is not None and not sip.isdeleted(busy):
         busy.close()
 
     if error is not None:
@@ -231,16 +240,20 @@ def _apply_update_result(parent, silent, tag, error, busy=None):
     dlg.show()
 
     downloader = _Downloader(tag)
-    downloader.progress.connect(dlg.setValue)
+    downloader.progress.connect(dlg.setValue, Qt.ConnectionType.QueuedConnection)
     downloader.done.connect(
-        lambda err: _finish_update(parent, tag, dlg, err))
+        lambda err: _finish_update(parent, tag, dlg, err),
+        Qt.ConnectionType.QueuedConnection)
     _track(downloader)
     downloader.start()
 
 
 def _finish_update(parent, tag, dlg, error):
     """Zatvorí okno priebehu a oznámi výsledok sťahovania."""
-    dlg.close()
+    if parent is not None and sip.isdeleted(parent):
+        return
+    if dlg is not None and not sip.isdeleted(dlg):
+        dlg.close()
     if error is not None:
         QMessageBox.critical(parent, "Aktualizácia zlyhala",
                              f"Aktualizáciu sa nepodarilo nainštalovať:\n{error}")
@@ -663,6 +676,10 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
+    icon_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "assets", "jadivcalc.svg")
+    if os.path.isfile(icon_file):
+        app.setWindowIcon(QIcon(icon_file))
     w = App()
     w.show()
     # Kontrolu aktualizácií spusti až po vykreslení okna; pri chybách / aktuálnej
