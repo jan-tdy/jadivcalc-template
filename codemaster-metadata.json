@@ -16,6 +16,7 @@
       "subdir": ".",
       "entrypoint": "jadivcalc_template_en.py",
       "run": "python3 jadivcalc_template_en.py",
+      "update_method": "release",
       "maintained": true
     }
   ]
