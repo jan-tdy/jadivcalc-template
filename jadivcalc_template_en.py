@@ -5,8 +5,8 @@ Generates N-digit numbers divisible by a chosen divisor (optionally with a
 condition on the divisibility of the digit sum), in ascending or descending
 order.
 
-Output uses typographic signs (÷, ×); the text template is stored exactly as
-you type it (e.g. with '/' and '*').
+Output uses typographic signs (÷, ×); the example pattern is derived
+automatically from the parameters (e.g. 'abcd/3=3*x       a+b+c+d=3*y').
 
 Settings live in a separate window (button in the top-right corner).
 
@@ -34,13 +34,12 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
 DEFAULT_USED_FILE = "template-math_used.json"
 DEFAULT_TEMPLATE_FILE = "template-math.json"
-DEFAULT_TEMPLATE = "abcd/3=3*x       a+b+c+d=3*y"
 
 # --- self-update ------------------------------------------------------------
 
@@ -279,7 +278,6 @@ def default_settings():
     return {
         "used_path": os.path.abspath(DEFAULT_USED_FILE),
         "tpl_path": os.path.abspath(DEFAULT_TEMPLATE_FILE),
-        "template": DEFAULT_TEMPLATE,
         "num_digits": 4,
         "divisor": 3,
         "use_sum": True,
@@ -297,6 +295,17 @@ def digit_sum(n):
         s += n % 10
         n //= 10
     return s
+
+
+def build_template(num_digits, divisor, use_sum, sum_divisor):
+    """Build the example pattern from the parameters, e.g.
+    'abcd/3=3*x       a+b+c+d=3*y' for 4 digits, divisor 3 and digit sum 3."""
+    letters = [chr(ord("a") + i) for i in range(num_digits)]
+    number = "".join(letters)
+    parts = [f"{number}/{divisor}={divisor}*x"]
+    if use_sum and sum_divisor > 0:
+        parts.append(f"{'+'.join(letters)}={sum_divisor}*y")
+    return "       ".join(parts)
 
 
 def build_pool(num_digits, divisor, use_sum, sum_divisor, order):
@@ -413,9 +422,6 @@ class SettingsDialog(QDialog):
         bt.clicked.connect(lambda: self._pick(self.tpl_path))
         fg.addWidget(bt, 1, 2)
 
-        fg.addWidget(QLabel("Template (text):"), 2, 0)
-        self.template = QLineEdit(s["template"])
-        fg.addWidget(self.template, 2, 1, 1, 2)
         fg.setColumnStretch(1, 1)
         lay.addWidget(files)
 
@@ -490,14 +496,18 @@ class SettingsDialog(QDialog):
             line_edit.setText(p)
 
     def get_values(self):
+        num_digits = self.num_digits.value()
+        divisor = self.divisor.value()
+        use_sum = self.use_sum.isChecked()
+        sum_divisor = self.sum_divisor.value()
         return {
             "used_path": self.used_path.text().strip(),
             "tpl_path": self.tpl_path.text().strip(),
-            "template": self.template.text(),
-            "num_digits": self.num_digits.value(),
-            "divisor": self.divisor.value(),
-            "use_sum": self.use_sum.isChecked(),
-            "sum_divisor": self.sum_divisor.value(),
+            "template": build_template(num_digits, divisor, use_sum, sum_divisor),
+            "num_digits": num_digits,
+            "divisor": divisor,
+            "use_sum": use_sum,
+            "sum_divisor": sum_divisor,
             "order": {0: "asc", 1: "desc", 2: "random"}.get(
                 self.order.currentIndex(), "asc"),
             "skip_used": self.skip_used.isChecked(),

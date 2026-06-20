@@ -26,8 +26,9 @@ Available in two languages:
 - **Typographic output** — uses proper `÷` and `×` signs in the results.
 - **No repeats** — generated examples are saved to a JSON registry and can be
   skipped on the next run.
-- **Template + parameters saved** — your text template and settings are stored
-  to a JSON file so they persist between sessions.
+- **Template + parameters saved** — the example pattern (derived automatically
+  from your parameters) and settings are stored to a JSON file so they persist
+  between sessions.
 - **Export to TXT** — save a clean, formatted worksheet for printing.
 - **Self-update** — on startup the app checks GitHub for a newer release and
   offers to update itself with a single click (see below).
@@ -85,10 +86,10 @@ To remove them again:
 ## Usage
 
 1. Click **⚙ Settings** (top-right corner) to configure:
-   - **Files** — where the registry and template JSON files are stored, and
-     the free-text template string.
+   - **Files** — where the registry and template JSON files are stored.
    - **Generation parameters** — number of digits, divisor, optional digit-sum
-     divisor, and sort order.
+     divisor, and sort order. The example pattern (e.g. `abcd/3=3*x
+     a+b+c+d=3*y`) is derived automatically from these parameters.
    - **Saving** — whether to skip already-used examples, save new ones to the
      registry, and save the template.
 2. Set the **number of examples** you want.
@@ -100,7 +101,7 @@ To remove them again:
 | File | Purpose |
 |------|---------|
 | `template-math_used.json` | Registry of every example that has been generated (used to avoid repeats). |
-| `template-math.json` | The current text template plus the generation parameters and a timestamp. |
+| `template-math.json` | The example pattern (derived from the parameters) plus the generation parameters and a timestamp. |
 
 Both paths are configurable in **Settings**.
 
