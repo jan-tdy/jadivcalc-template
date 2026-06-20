@@ -497,7 +497,8 @@ class SettingsDialog(QDialog):
             "divisor": self.divisor.value(),
             "use_sum": self.use_sum.isChecked(),
             "sum_divisor": self.sum_divisor.value(),
-            "order": ("asc", "desc", "random")[self.order.currentIndex()],
+            "order": {0: "asc", 1: "desc", 2: "random"}.get(
+                self.order.currentIndex(), "asc"),
             "skip_used": self.skip_used.isChecked(),
             "save_used": self.save_used.isChecked(),
             "save_tpl": self.save_tpl.isChecked(),
@@ -581,7 +582,7 @@ class App(QWidget):
         s = self.settings.get_values()
         cond = f", ciferný súčet {DIV_SIGN}{s['sum_divisor']}" if s["use_sum"] else ""
         order = {"asc": "vzostupne", "desc": "zostupne",
-                 "random": "náhodne"}[s["order"]]
+                 "random": "náhodne"}.get(s["order"], "vzostupne")
         self.subtitle.setText(
             f"{s['num_digits']}-cifer. čísla deliteľné {s['divisor']}{cond} · {order}")
 
@@ -660,7 +661,7 @@ class App(QWidget):
         s = self.settings.get_values()
         cond = f", ciferný súčet {DIV_SIGN}{s['sum_divisor']}" if s["use_sum"] else ""
         order = {"asc": "vzostupne", "desc": "zostupne",
-                 "random": "náhodne"}[s["order"]]
+                 "random": "náhodne"}.get(s["order"], "vzostupne")
         header = [
             f"{APP_NAME} {APP_VERSION}",
             f"Šablóna: {s['template']}",

@@ -498,7 +498,8 @@ class SettingsDialog(QDialog):
             "divisor": self.divisor.value(),
             "use_sum": self.use_sum.isChecked(),
             "sum_divisor": self.sum_divisor.value(),
-            "order": ("asc", "desc", "random")[self.order.currentIndex()],
+            "order": {0: "asc", 1: "desc", 2: "random"}.get(
+                self.order.currentIndex(), "asc"),
             "skip_used": self.skip_used.isChecked(),
             "save_used": self.save_used.isChecked(),
             "save_tpl": self.save_tpl.isChecked(),
@@ -583,7 +584,7 @@ class App(QWidget):
         s = self.settings.get_values()
         cond = f", digit sum {DIV_SIGN}{s['sum_divisor']}" if s["use_sum"] else ""
         order = {"asc": "ascending", "desc": "descending",
-                 "random": "random"}[s["order"]]
+                 "random": "random"}.get(s["order"], "ascending")
         self.subtitle.setText(
             f"{s['num_digits']}-digit numbers divisible by {s['divisor']}{cond} · {order}")
 
@@ -662,7 +663,7 @@ class App(QWidget):
         s = self.settings.get_values()
         cond = f", digit sum {DIV_SIGN}{s['sum_divisor']}" if s["use_sum"] else ""
         order = {"asc": "ascending", "desc": "descending",
-                 "random": "random"}[s["order"]]
+                 "random": "random"}.get(s["order"], "ascending")
         header = [
             f"{APP_NAME} {APP_VERSION}",
             f"Template: {s['template']}",
