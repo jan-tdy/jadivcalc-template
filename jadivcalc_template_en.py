@@ -17,6 +17,7 @@ Saves:
 
 import json
 import os
+import random
 import sys
 import urllib.error
 import urllib.request
@@ -33,7 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.3.0"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -300,7 +301,8 @@ def digit_sum(n):
 
 def build_pool(num_digits, divisor, use_sum, sum_divisor, order):
     """N-digit numbers divisible by `divisor`, optionally with a digit sum
-    divisible by `sum_divisor`. Returns a list in the requested order."""
+    divisible by `sum_divisor`. Returns a list in the requested order
+    ('asc', 'desc' or 'random')."""
     low = 1 if num_digits == 1 else 10 ** (num_digits - 1)
     high = 10 ** num_digits - 1
     start = low + ((-low) % divisor)          # first >= low divisible by divisor
@@ -311,6 +313,8 @@ def build_pool(num_digits, divisor, use_sum, sum_divisor, order):
         pool = list(nums)
     if order == "desc":
         pool.reverse()
+    elif order == "random":
+        random.shuffle(pool)
     return pool
 
 
@@ -442,8 +446,9 @@ class SettingsDialog(QDialog):
 
         pg.addWidget(QLabel("Order:"), 3, 0)
         self.order = QComboBox()
-        self.order.addItems(["ascending", "descending"])
-        self.order.setCurrentIndex(0 if s["order"] == "asc" else 1)
+        self.order.addItems(["ascending", "descending", "random"])
+        self.order.setCurrentIndex({"asc": 0, "desc": 1, "random": 2}
+                                   .get(s["order"], 0))
         pg.addWidget(self.order, 3, 1)
         pg.setColumnStretch(1, 1)
         lay.addWidget(params)
@@ -493,7 +498,7 @@ class SettingsDialog(QDialog):
             "divisor": self.divisor.value(),
             "use_sum": self.use_sum.isChecked(),
             "sum_divisor": self.sum_divisor.value(),
-            "order": "asc" if self.order.currentIndex() == 0 else "desc",
+            "order": ("asc", "desc", "random")[self.order.currentIndex()],
             "skip_used": self.skip_used.isChecked(),
             "save_used": self.save_used.isChecked(),
             "save_tpl": self.save_tpl.isChecked(),
@@ -577,7 +582,8 @@ class App(QWidget):
     def _refresh_subtitle(self):
         s = self.settings.get_values()
         cond = f", digit sum {DIV_SIGN}{s['sum_divisor']}" if s["use_sum"] else ""
-        order = "ascending" if s["order"] == "asc" else "descending"
+        order = {"asc": "ascending", "desc": "descending",
+                 "random": "random"}[s["order"]]
         self.subtitle.setText(
             f"{s['num_digits']}-digit numbers divisible by {s['divisor']}{cond} · {order}")
 
@@ -655,7 +661,8 @@ class App(QWidget):
             return
         s = self.settings.get_values()
         cond = f", digit sum {DIV_SIGN}{s['sum_divisor']}" if s["use_sum"] else ""
-        order = "ascending" if s["order"] == "asc" else "descending"
+        order = {"asc": "ascending", "desc": "descending",
+                 "random": "random"}[s["order"]]
         header = [
             f"{APP_NAME} {APP_VERSION}",
             f"Template: {s['template']}",
