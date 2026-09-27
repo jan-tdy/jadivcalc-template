@@ -31,7 +31,9 @@ Available in two languages:
 - **Template + parameters saved** — the example pattern (derived automatically
   from your parameters) and settings are stored to a JSON file so they persist
   between sessions.
-- **Export to TXT** — save a clean, formatted worksheet for printing.
+- **Export to TXT** — save a clean, formatted worksheet for printing, either
+  with the results filled in or as a blank worksheet (**Save as TXT (no
+  results)**) for students to solve.
 - **Self-update** — on startup the app checks GitHub for a newer release and
   offers to update itself with a single click (see below).
 
@@ -99,7 +101,9 @@ To remove them again:
      registry, and save the template.
 2. Set the **number of examples** you want.
 3. Click **Generate**. The results appear in the table below.
-4. Click **Save as TXT** to export a printable worksheet.
+4. Click **Save as TXT** to export a printable worksheet with results, or
+   **Save as TXT (no results)** to export a blank worksheet with the answers
+   left out (e.g. `123÷3=` instead of `123÷3=41`).
 
 ### Output files
 
