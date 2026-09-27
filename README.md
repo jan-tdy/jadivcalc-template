@@ -25,7 +25,9 @@ Available in two languages:
   by a second number (great for practising divisibility rules).
 - **Typographic output** — uses proper `÷` and `×` signs in the results.
 - **No repeats** — generated examples are saved to a JSON registry and can be
-  skipped on the next run.
+  skipped on the next run. When the pool for a parameter combination runs dry,
+  **Settings → Files → Clear registry…** resets it (with a confirmation
+  prompt) so you can start a new cycle without hand-editing the JSON file.
 - **Template + parameters saved** — the example pattern (derived automatically
   from your parameters) and settings are stored to a JSON file so they persist
   between sessions.
@@ -86,7 +88,10 @@ To remove them again:
 ## Usage
 
 1. Click **⚙ Settings** (top-right corner) to configure:
-   - **Files** — where the registry and template JSON files are stored.
+   - **Files** — where the registry and template JSON files are stored, and a
+     **Clear registry…** button to reset the "used examples" registry (asks
+     for confirmation first) once a parameter combination's pool has been
+     fully used up.
    - **Generation parameters** — number of digits, divisor, optional digit-sum
      divisor, and sort order. The example pattern (e.g. `abcd/3=3*x
      a+b+c+d=3*y`) is derived automatically from these parameters.

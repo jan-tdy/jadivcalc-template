@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.3.2"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -421,6 +421,10 @@ class SettingsDialog(QDialog):
         bt.clicked.connect(lambda: self._pick(self.tpl_path))
         fg.addWidget(bt, 1, 2)
 
+        clear_btn = QPushButton("Vymazať register…")
+        clear_btn.clicked.connect(self._clear_registry)
+        fg.addWidget(clear_btn, 2, 1, 1, 2, Qt.AlignmentFlag.AlignRight)
+
         fg.setColumnStretch(1, 1)
         lay.addWidget(files)
 
@@ -493,6 +497,27 @@ class SettingsDialog(QDialog):
             "JSON (*.json);;Všetky súbory (*.*)")
         if p:
             line_edit.setText(p)
+
+    def _clear_registry(self):
+        path = self.used_path.text().strip()
+        if not path:
+            QMessageBox.warning(self, "Upozornenie", "Nie je zadaný register.")
+            return
+        reply = QMessageBox.question(
+            self, "Vymazať register",
+            "Týmto natrvalo vymažeš všetky príklady zaznamenané v\n"
+            f"{path}\n\nVšetky príklady bude možné znova vygenerovať. Pokračovať?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            save_registry(path, [])
+        except OSError as e:
+            QMessageBox.critical(self, "Chyba pri mazaní registra", str(e))
+            return
+        QMessageBox.information(self, "Register vymazaný",
+                                "Register bol vymazaný.")
 
     def get_values(self):
         num_digits = self.num_digits.value()
