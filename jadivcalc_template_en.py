@@ -596,6 +596,11 @@ class App(QWidget):
         self.btn_txt.setEnabled(False)
         self.btn_txt.clicked.connect(self.save_txt)
         row.addWidget(self.btn_txt)
+        self.btn_txt_blank = QPushButton("Save as TXT (no results)")
+        self.btn_txt_blank.setMinimumHeight(34)
+        self.btn_txt_blank.setEnabled(False)
+        self.btn_txt_blank.clicked.connect(lambda: self.save_txt(blank=True))
+        row.addWidget(self.btn_txt_blank)
         root.addLayout(row)
 
         # output
@@ -672,26 +677,33 @@ class App(QWidget):
         self._show(records)
         self.records = records
         self.btn_txt.setEnabled(True)
+        self.btn_txt_blank.setEnabled(True)
         suffix = ("  (" + ", ".join(notes) + ")") if notes else ""
         self.status.setText(f"Generated {len(records)} examples.{suffix}")
 
-    def _format_lines(self, records):
+    def _format_lines(self, records, blank=False):
         w = max((len(str(r["n"])) for r in records), default=5)
         head = f"{'#':>4}  {'number':<{w}}  {'division':<16}  digit sum"
         lines = [head, "─" * max(len(head), 40)]
         for i, r in enumerate(records, 1):
-            lines.append(
-                f"{i:>4}  {r['n']:<{w}}  {r['eq_div']:<16}  {r['eq_sum']}")
+            if blank:
+                eq_div = f"{r['n']}{DIV_SIGN}{r['divisor']}="
+                eq_sum = "+".join(str(d) for d in r["digits"]) + "="
+            else:
+                eq_div = r["eq_div"]
+                eq_sum = r["eq_sum"]
+            lines.append(f"{i:>4}  {r['n']:<{w}}  {eq_div:<16}  {eq_sum}")
         return lines
 
     def _show(self, records):
         self.out.setPlainText("\n".join(self._format_lines(records)))
 
-    def save_txt(self):
+    def save_txt(self, blank=False):
         if not self.records:
             return
+        default_name = "examples_blank.txt" if blank else "examples.txt"
         p, _ = QFileDialog.getSaveFileName(
-            self, "Save as TXT", "examples.txt",
+            self, "Save as TXT", default_name,
             "Text (*.txt);;All files (*.*)")
         if not p:
             return
@@ -700,14 +712,14 @@ class App(QWidget):
         order = {"asc": "ascending", "desc": "descending",
                  "random": "random"}.get(s["order"], "ascending")
         header = [
-            f"{APP_NAME} {APP_VERSION}",
+            f"{APP_NAME} {APP_VERSION}" + (" – no results" if blank else ""),
             f"Template: {s['template']}",
             f"Parameters: {s['num_digits']}-digit divisible by {s['divisor']}{cond} · {order}",
             f"Count: {len(self.records)}   "
             f"({datetime.now().isoformat(timespec='seconds')})",
             "",
         ]
-        body = self._format_lines(self.records)
+        body = self._format_lines(self.records, blank=blank)
         try:
             with open(p, "w", encoding="utf-8") as f:
                 f.write("\n".join(header + body) + "\n")
