@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "0.3.1"
+APP_VERSION = "1.0.0"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -422,6 +422,10 @@ class SettingsDialog(QDialog):
         bt.clicked.connect(lambda: self._pick(self.tpl_path))
         fg.addWidget(bt, 1, 2)
 
+        clear_btn = QPushButton("Clear registry…")
+        clear_btn.clicked.connect(self._clear_registry)
+        fg.addWidget(clear_btn, 2, 1, 1, 2, Qt.AlignmentFlag.AlignRight)
+
         fg.setColumnStretch(1, 1)
         lay.addWidget(files)
 
@@ -494,6 +498,27 @@ class SettingsDialog(QDialog):
             "JSON (*.json);;All files (*.*)")
         if p:
             line_edit.setText(p)
+
+    def _clear_registry(self):
+        path = self.used_path.text().strip()
+        if not path:
+            QMessageBox.warning(self, "Warning", "No registry file is set.")
+            return
+        reply = QMessageBox.question(
+            self, "Clear registry",
+            "This will permanently delete every example recorded in\n"
+            f"{path}\n\nAll examples will be eligible for generation again. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            save_registry(path, [])
+        except OSError as e:
+            QMessageBox.critical(self, "Error clearing registry", str(e))
+            return
+        QMessageBox.information(self, "Registry cleared",
+                                "The registry has been cleared.")
 
     def get_values(self):
         num_digits = self.num_digits.value()
