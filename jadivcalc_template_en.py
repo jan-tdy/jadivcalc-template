@@ -18,6 +18,7 @@ Saves:
 import json
 import os
 import random
+import shutil
 import sys
 import urllib.error
 import urllib.request
@@ -109,7 +110,7 @@ def install_update(tag, progress=None):
     with open(tmp, "wb") as f:
         f.write(new_code)
     if os.path.exists(target):
-        os.replace(target, backup)
+        shutil.copy2(target, backup)
     os.replace(tmp, target)
 
 
