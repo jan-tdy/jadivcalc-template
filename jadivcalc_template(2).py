@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "JadivCalc Template"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -390,6 +390,24 @@ def save_template(path, template_str, params, last_count):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def load_template(path):
+    """Načíta predtým uložené parametre generovania z `path` (ak existujú).
+
+    Vráti slovník "params" uložený funkciou `save_template` (napr. num_digits,
+    divisor, use_sum, sum_divisor, order), alebo None, ak súbor chýba, nedá sa
+    načítať, alebo neobsahuje použiteľné parametre."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("params"), dict):
+        return data["params"]
+    return None
+
+
 # --- okno nastavení ---------------------------------------------------------
 
 class SettingsDialog(QDialog):
@@ -548,7 +566,13 @@ class App(QWidget):
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(720, 620)
         self.setMinimumSize(560, 480)
-        self.settings = SettingsDialog(self, default_settings())
+        settings = default_settings()
+        saved = load_template(settings["tpl_path"])
+        if saved:
+            for key in ("num_digits", "divisor", "use_sum", "sum_divisor", "order"):
+                if key in saved:
+                    settings[key] = saved[key]
+        self.settings = SettingsDialog(self, settings)
         self.settings.finished.connect(self._refresh_subtitle)
         self._build()
         self._refresh_subtitle()
