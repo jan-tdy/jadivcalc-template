@@ -15,6 +15,7 @@ Saves:
   - template definition + parameters -> template-math.json
 """
 
+import itertools
 import json
 import os
 import random
@@ -41,6 +42,10 @@ MUL_SIGN = "×"
 
 DEFAULT_USED_FILE = "template-math_used.json"
 DEFAULT_TEMPLATE_FILE = "template-math.json"
+
+# Upper bound for "Number of examples" – keeps the result view and output
+# files responsive even for the largest parameter combinations.
+MAX_COUNT = 10_000
 
 # --- self-update ------------------------------------------------------------
 
@@ -309,23 +314,22 @@ def build_template(num_digits, divisor, use_sum, sum_divisor):
     return "       ".join(parts)
 
 
-def build_pool(num_digits, divisor, use_sum, sum_divisor, order):
-    """N-digit numbers divisible by `divisor`, optionally with a digit sum
-    divisible by `sum_divisor`. Returns a list in the requested order
-    ('asc', 'desc' or 'random')."""
+def candidates(num_digits, divisor, use_sum, sum_divisor, order):
+    """Lazily yield N-digit numbers divisible by `divisor`, optionally with a
+    digit sum divisible by `sum_divisor`, in 'asc' or 'desc' order. Nothing is
+    materialised, so callers that only need a few items stay fast."""
     low = 1 if num_digits == 1 else 10 ** (num_digits - 1)
     high = 10 ** num_digits - 1
     start = low + ((-low) % divisor)          # first >= low divisible by divisor
     nums = range(start, high + 1, divisor)
-    if use_sum and sum_divisor > 0:
-        pool = [n for n in nums if digit_sum(n) % sum_divisor == 0]
-    else:
-        pool = list(nums)
     if order == "desc":
-        pool.reverse()
-    elif order == "random":
-        random.shuffle(pool)
-    return pool
+        nums = reversed(nums)
+    if use_sum and sum_divisor > 0:
+        for n in nums:
+            if digit_sum(n) % sum_divisor == 0:
+                yield n
+    else:
+        yield from nums
 
 
 def make_record(n, divisor, use_sum, sum_divisor):
@@ -351,34 +355,85 @@ def make_record(n, divisor, use_sum, sum_divisor):
     return rec
 
 
+class RegistryError(Exception):
+    """The registry could not be read. `corrupt` is True when the file exists
+    but its content is not a valid registry (safe to move aside), False for
+    I/O problems (the file must be left untouched)."""
+
+    def __init__(self, message, corrupt):
+        super().__init__(message)
+        self.corrupt = corrupt
+
+
+def atomic_write_json(path, data):
+    """Write `data` as JSON via a temp file and os.replace, so a crash or a
+    serialization error can never leave `path` half-written."""
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def load_registry(path):
+    """Return the list of recorded examples. A missing file is an empty
+    registry; an unreadable or unparseable file raises RegistryError instead of
+    silently looking empty (which would make the next save wipe it)."""
     if not path or not os.path.isfile(path):
         return []
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
+    except OSError as e:
+        raise RegistryError(f"Cannot read registry:\n{path}\n\n{e}", corrupt=False)
+    except ValueError as e:      # JSONDecodeError and UnicodeDecodeError
+        raise RegistryError(f"Registry is not valid JSON:\n{path}\n\n{e}", corrupt=True)
     if isinstance(data, list):
         return data
     if isinstance(data, dict) and isinstance(data.get("examples"), list):
         return data["examples"]
-    return []
+    raise RegistryError(f"Registry has an unexpected structure:\n{path}",
+                        corrupt=True)
 
 
-def used_set(registry):
+def quarantine_registry(path):
+    """Move an unusable registry aside (never deleted) and return the new name."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = f"{path}.corrupt-{stamp}"
+    os.replace(path, dest)
+    return dest
+
+
+def used_set(registry, divisor, sum_divisor):
+    """Numbers already recorded for the given parameter combination.
+
+    A record matches when its divisor and digit-sum divisor (0 = no digit-sum
+    condition) are the same. Records written by older versions carry no
+    parameters; they are treated as matching any combination so that they can
+    never cause repeats."""
     out = set()
     for r in registry:
-        if "n" in r:
-            out.add(r["n"])
-        elif "abcd" in r:            # backward compatibility with older files
-            out.add(r["abcd"])
+        n = r.get("n", r.get("abcd"))    # "abcd": backward compatibility
+        if n is None:
+            continue
+        if "divisor" not in r:
+            out.add(n)
+        elif r["divisor"] == divisor and r.get("sum_divisor", 0) == sum_divisor:
+            out.add(n)
     return out
 
 
 def save_registry(path, registry):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(registry, f, ensure_ascii=False, indent=2)
+    atomic_write_json(path, registry)
 
 
 def save_template(path, template_str, params, last_count):
@@ -388,8 +443,7 @@ def save_template(path, template_str, params, last_count):
         "last_generated_count": last_count,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(path, data)
 
 
 def load_template(path):
@@ -607,7 +661,7 @@ class App(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Number of examples:"))
         self.count = QSpinBox()
-        self.count.setRange(1, 1_000_000)
+        self.count.setRange(1, MAX_COUNT)
         self.count.setValue(10)
         row.addWidget(self.count)
         row.addStretch(1)
@@ -656,26 +710,51 @@ class App(QWidget):
     def generate(self):
         s = self.settings.get_values()
         count = self.count.value()
+        sum_div = s["sum_divisor"] if s["use_sum"] else 0
 
-        registry = load_registry(s["used_path"])
-        used = used_set(registry)
+        try:
+            registry = load_registry(s["used_path"])
+        except RegistryError as e:
+            if not e.corrupt:
+                QMessageBox.critical(self, "Error reading registry", str(e))
+                return
+            # Keep the damaged file as a backup, then start a fresh registry.
+            try:
+                backup = quarantine_registry(s["used_path"])
+            except OSError as err:
+                QMessageBox.critical(
+                    self, "Error reading registry",
+                    f"{e}\n\nIt could not be moved aside, so nothing was "
+                    f"generated or saved:\n{err}")
+                return
+            QMessageBox.warning(
+                self, "Registry was corrupt",
+                f"{e}\n\nThe damaged file was moved to:\n{backup}\n\n"
+                "A new registry will be started.")
+            registry = []
+        used = used_set(registry, s["divisor"], sum_div)
 
-        pool = build_pool(s["num_digits"], s["divisor"], s["use_sum"],
-                          s["sum_divisor"], s["order"])
+        gen = candidates(s["num_digits"], s["divisor"], s["use_sum"],
+                         s["sum_divisor"], s["order"])
         if s["skip_used"]:
-            pool = [n for n in pool if n not in used]
+            gen = (n for n in gen if n not in used)
 
-        if not pool:
+        if s["order"] == "random":
+            # Uniform sample over every eligible number, without a full shuffle.
+            pool = list(gen)
+            chosen = random.sample(pool, min(count, len(pool)))
+        else:
+            chosen = list(itertools.islice(gen, count))
+
+        if not chosen:
             QMessageBox.warning(self, "Warning",
                                 "No new examples available for the given parameters.")
             return
-        if count > len(pool):
+        if count > len(chosen):
             QMessageBox.warning(
                 self, "Warning",
-                f"Only {len(pool)} examples available. {len(pool)} will be generated.")
-            count = len(pool)
+                f"Only {len(chosen)} examples available. {len(chosen)} will be generated.")
 
-        chosen = pool[:count]
         records = [make_record(n, s["divisor"], s["use_sum"], s["sum_divisor"])
                    for n in chosen]
 
