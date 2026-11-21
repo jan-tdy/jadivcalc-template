@@ -94,6 +94,8 @@ def download_script(tag, progress=None, timeout=20):
             read += len(chunk)
             if progress and total:
                 progress(min(100, int(read * 100 / total)))
+        if total and read != total:
+            raise OSError(f"Neúplné stiahnutie aktualizácie: prijatých {read} z {total} bajtov")
     return b"".join(chunks)
 
 
@@ -103,13 +105,22 @@ def install_update(tag, progress=None):
     if not new_code or b"JadivCalc" not in new_code:
         raise OSError("Stiahnutý súbor sa zdá byť poškodený.")
     target = os.path.abspath(__file__)
+    try:
+        compile(new_code, target, "exec")
+    except (SyntaxError, UnicodeDecodeError) as err:
+        raise OSError("Stiahnutý súbor nie je platný Python.") from err
+
     tmp = target + ".new"
     backup = target + ".bak"
-    with open(tmp, "wb") as f:
-        f.write(new_code)
-    if os.path.exists(target):
-        os.replace(target, backup)
-    os.replace(tmp, target)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(new_code)
+        if os.path.exists(target):
+            shutil.copy2(target, backup)
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def restart_app():
