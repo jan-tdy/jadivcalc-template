@@ -14,6 +14,7 @@ Ukladá:
   - definíciu šablóny + parametre  -> template-math.json
 """
 
+import itertools
 import json
 import os
 import random
@@ -34,6 +35,7 @@ from PyQt6.QtWidgets import (
 
 APP_NAME = "JadivCalc Template"
 APP_VERSION = "1.0.1"
+MAX_COUNT = 10_000
 DIV_SIGN = "÷"
 MUL_SIGN = "×"
 
@@ -307,23 +309,20 @@ def build_template(num_digits, divisor, use_sum, sum_divisor):
     return "       ".join(parts)
 
 
-def build_pool(num_digits, divisor, use_sum, sum_divisor, order):
-    """N-ciferné čísla deliteľné `divisor`, voliteľne s ciferným súčtom
-    deliteľným `sum_divisor`. Vracia zoznam v zadanom poradí
-    ('asc', 'desc' alebo 'random')."""
+def candidates(num_digits, divisor, use_sum, sum_divisor, order):
+    """Lazily yield N-digit numbers that match the selected divisibility rules."""
     low = 1 if num_digits == 1 else 10 ** (num_digits - 1)
     high = 10 ** num_digits - 1
-    start = low + ((-low) % divisor)          # prvé >= low deliteľné `divisor`
-    nums = range(start, high + 1, divisor)
-    if use_sum and sum_divisor > 0:
-        pool = [n for n in nums if digit_sum(n) % sum_divisor == 0]
-    else:
-        pool = list(nums)
+    start = low + ((-low) % divisor)
+    numbers = range(start, high + 1, divisor)
     if order == "desc":
-        pool.reverse()
-    elif order == "random":
-        random.shuffle(pool)
-    return pool
+        numbers = reversed(numbers)
+    if use_sum and sum_divisor > 0:
+        for number in numbers:
+            if digit_sum(number) % sum_divisor == 0:
+                yield number
+    else:
+        yield from numbers
 
 
 def make_record(n, divisor, use_sum, sum_divisor):
@@ -349,34 +348,72 @@ def make_record(n, divisor, use_sum, sum_divisor):
     return rec
 
 
+class RegistryError(Exception):
+    """Chyba pri načítaní registra; corrupt označuje súbor bezpečný na odloženie."""
+
+    def __init__(self, message, corrupt=False):
+        super().__init__(message)
+        self.corrupt = corrupt
+
+
+def atomic_write_json(path, data):
+    text = json.dumps(data, ensure_ascii=False, indent=2)
+    temporary = path + ".tmp"
+    try:
+        with open(temporary, "w", encoding="utf-8") as output:
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
 def load_registry(path):
     if not path or not os.path.isfile(path):
         return []
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
+        with open(path, "r", encoding="utf-8") as source:
+            data = json.load(source)
+    except OSError as err:
+        raise RegistryError(f"Register sa nedá načítať:\n{path}\n\n{err}", corrupt=False)
+    except ValueError as err:
+        raise RegistryError(f"Register neobsahuje platný JSON:\n{path}\n\n{err}", corrupt=True)
     if isinstance(data, list):
         return data
     if isinstance(data, dict) and isinstance(data.get("examples"), list):
         return data["examples"]
-    return []
+    raise RegistryError(f"Register má neočakávanú štruktúru:\n{path}", corrupt=True)
 
 
-def used_set(registry):
-    out = set()
-    for r in registry:
-        if "n" in r:
-            out.add(r["n"])
-        elif "abcd" in r:            # spätná kompatibilita so staršími súbormi
-            out.add(r["abcd"])
-    return out
+def quarantine_registry(path):
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = f"{path}.corrupt-{timestamp}"
+    os.replace(path, backup)
+    return backup
+
+
+def used_set(registry, divisor, sum_divisor):
+    used = set()
+    for record in registry:
+        if not isinstance(record, dict):
+            continue
+        number = record.get("n", record.get("abcd"))
+        if number is None:
+            continue
+        if "divisor" not in record:
+            used.add(number)
+        elif record["divisor"] == divisor and record.get("sum_divisor", 0) == sum_divisor:
+            used.add(number)
+    return used
 
 
 def save_registry(path, registry):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(registry, f, ensure_ascii=False, indent=2)
+    atomic_write_json(path, registry)
 
 
 def save_template(path, template_str, params, last_count):
@@ -386,8 +423,7 @@ def save_template(path, template_str, params, last_count):
         "last_generated_count": last_count,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(path, data)
 
 
 def load_template(path):
@@ -604,7 +640,7 @@ class App(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Počet príkladov:"))
         self.count = QSpinBox()
-        self.count.setRange(1, 1_000_000)
+        self.count.setRange(1, MAX_COUNT)
         self.count.setValue(10)
         row.addWidget(self.count)
         row.addStretch(1)
@@ -653,29 +689,53 @@ class App(QWidget):
     def generate(self):
         s = self.settings.get_values()
         count = self.count.value()
+        sum_divisor = s["sum_divisor"] if s["use_sum"] else 0
 
-        registry = load_registry(s["used_path"])
-        used = used_set(registry)
+        try:
+            registry = load_registry(s["used_path"])
+        except RegistryError as err:
+            if not err.corrupt:
+                QMessageBox.critical(self, "Chyba pri čítaní registra", str(err))
+                return
+            try:
+                backup = quarantine_registry(s["used_path"])
+            except OSError as move_error:
+                QMessageBox.critical(
+                    self, "Chyba pri čítaní registra",
+                    f"{err}\n\nPoškodený súbor sa nepodarilo odložiť; "
+                    f"nič sa nevygenerovalo ani neuložilo:\n{move_error}")
+                return
+            QMessageBox.warning(
+                self, "Poškodený register",
+                f"{err}\n\nPoškodený súbor bol presunutý sem:\n{backup}\n\n"
+                "Začne sa nový register.")
+            registry = []
 
-        pool = build_pool(s["num_digits"], s["divisor"], s["use_sum"],
-                          s["sum_divisor"], s["order"])
+        used = used_set(registry, s["divisor"], sum_divisor)
+        numbers = candidates(
+            s["num_digits"], s["divisor"], s["use_sum"],
+            s["sum_divisor"], s["order"]
+        )
         if s["skip_used"]:
-            pool = [n for n in pool if n not in used]
+            numbers = (number for number in numbers if number not in used)
 
-        if not pool:
+        if s["order"] == "random":
+            pool = list(numbers)
+            chosen = random.sample(pool, min(count, len(pool)))
+        else:
+            chosen = list(itertools.islice(numbers, count))
+
+        if not chosen:
             QMessageBox.warning(self, "Upozornenie",
                                 "Pre dané parametre nie sú dostupné žiadne nové príklady.")
             return
-        if count > len(pool):
+        if count > len(chosen):
             QMessageBox.warning(
                 self, "Upozornenie",
-                f"Dostupných je len {len(pool)} príkladov. Vygeneruje sa {len(pool)}.")
-            count = len(pool)
+                f"Dostupných je len {len(chosen)} príkladov. Vygeneruje sa {len(chosen)}.")
 
-        chosen = pool[:count]
         records = [make_record(n, s["divisor"], s["use_sum"], s["sum_divisor"])
                    for n in chosen]
-
         notes = []
         if s["save_used"] and s["used_path"]:
             new = [r for r in records if r["n"] not in used]
